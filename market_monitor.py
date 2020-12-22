@@ -422,7 +422,7 @@ class Monitor:
     BAR_NUMS_SLIDING_WINDOW = 50  # Determine S/R by how many bars?
 
     @classmethod
-    def send_bot_message(cls, message, disable_notification=False):
+    def bot_send_message(cls, message, disable_notification=False):
         SEND_MESSAGE_API_ENDPOINT = f'https://api.telegram.org/bot{os.getenv("TELEGRAM_BOT_TOKEN")}/sendMessage'
         RETRY_LIMIT = 3
 
@@ -433,10 +433,31 @@ class Monitor:
         }
         for _ in range(RETRY_LIMIT):
             response = requests.post(SEND_MESSAGE_API_ENDPOINT, data=data)
-            if response.json().get('ok', False):
+            if response.status_code == 200:
                 return True
             time.sleep(3)
         logger.error(f'Failed to send bot message [{message}]!')
+        return False
+
+    @classmethod
+    def bot_send_image(cls, image_path, caption='', disable_notification=False):
+        SEND_PHOTO_API_ENDPOINT = f'https://api.telegram.org/bot{os.getenv("TELEGRAM_BOT_TOKEN")}/sendPhoto'
+        RETRY_LIMIT = 3
+
+        files = {
+            'photo': open(image_path, 'rb')
+        }
+        data = {
+            'chat_id': os.getenv('TELEGRAM_BOT_SEND_MESSAGE_GROUP_ID'),
+            'caption': caption,
+        }
+        for _ in range(RETRY_LIMIT):
+            response = requests.post(
+                SEND_PHOTO_API_ENDPOINT, files=files, data=data)
+            if response.status_code == 200:
+                return True
+            time.sleep(3)
+        logger.error(f'Failed to send photo [{caption}]!')
         return False
 
     @ classmethod
@@ -468,28 +489,40 @@ class Monitor:
                     df_latest = df.tail(3)
                     if setup := SetupFinder.current_setup(zones, df_latest):
                         message = f'[{get_now_timestamp_string()}] {market} setup: {setup}'
-                        if cls.send_bot_message(message):
-                            logger.info(f'Sent bot message: `{message}`')
-                        else:
-                            logger.error(f'Failed to send bot message!')
+                        image_path = None
 
-                    if show_chart or save_chart:
-                        plot_config = dict(
-                            df_in_major_timeframe=df_resampled_into_major_timeframe,
-                            major_timeframe_in_minutes=major_timeframe_in_minutes,
-                            df_in_minor_timeframe=df,
-                            minor_timeframe_in_minutes=minor_timeframe_in_minutes,
-                            zones=zones,
-                            levels=levels,
-                            title=market,
-                        )
-                        ChartPlotter.plot(**plot_config)
+                        if show_chart or save_chart:
+                            plot_config = dict(
+                                df_in_major_timeframe=df_resampled_into_major_timeframe,
+                                major_timeframe_in_minutes=major_timeframe_in_minutes,
+                                df_in_minor_timeframe=df,
+                                minor_timeframe_in_minutes=minor_timeframe_in_minutes,
+                                zones=zones,
+                                levels=levels,
+                                title=market,
+                            )
+                            ChartPlotter.plot(**plot_config)
+
+                            if save_chart:
+                                file_name = f"fig_{market}_{setup.replace(' ', '-')}_{get_now_timestamp_string()}.jpg"
+                                image_path = LOGS_DIR / file_name
+                                plt.savefig(fname=image_path,
+                                            bbox_inches='tight')
+                            if show_chart:
+                                mpf.show()
 
                         if save_chart:
-                            filename = f"fig_{market}_{setup.replace(' ', '-')}_{get_now_timestamp_string()}.jpg"
-                            plt.savefig(fname=LOGS_DIR / filename, bbox_inches='tight')
-                        if show_chart:
-                            mpf.show()
+                            if cls.bot_send_image(image_path, message):
+                                logger.info(
+                                    f'Bot sent image: `{image_path}` `{message}`')
+                            else:
+                                logger.error(f'Failed to send image via bot!')
+                        else:
+                            if cls.bot_send_message(message):
+                                logger.info(f'Bot sent message: `{message}`')
+                            else:
+                                logger.error(
+                                    f'Failed to send message via bot!')
                 except:
                     logger.error(f'Unexpected exception:', sys.exc_info()[0])
 
