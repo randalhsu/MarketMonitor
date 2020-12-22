@@ -1,0 +1,5 @@
+python-dotenv
+pandas
+matplotlib
+mplfinance
+requests
