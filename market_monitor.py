@@ -328,6 +328,11 @@ class DataGrabber:
         return self.timeframe_in_minutes
 
     @classmethod
+    def get_test_dataframe(cls) -> pd.DataFrame:
+        from test_data_alphavantage import TEST_DATA_ALPHAVANTAGE_EURUSD_5MIN_JSON_STRING
+        return cls.parse_alphavantage_json_string_to_dataframe(TEST_DATA_ALPHAVANTAGE_EURUSD_5MIN_JSON_STRING)
+
+    @classmethod
     def parse_alphavantage_json_string_to_dataframe(cls, json_string: str) -> pd.DataFrame:
         results = json.loads(json_string)
         if 'Error Message' in results:
@@ -625,12 +630,18 @@ def load_env() -> None:
 
 if __name__ == '__main__':
     run_as_daemon = 'daemon' in sys.argv
+    run_simulation_test = 'sim' in sys.argv
+
     load_env()
     setup_logs()
 
     timeframe_in_minutes = 15
     monitor = Monitor()
-    # monitor.run_simulation(DataFeedGrabberTestCase.get_test_dataframe_5min_full())
+
+    if run_simulation_test:
+        monitor.run_simulation(DataGrabber.get_test_dataframe())
+        exit()
+
     data_grabbers = [
         DataGrabber('EUR', 'USD', timeframe_in_minutes),
         DataGrabber('AUD', 'USD', timeframe_in_minutes),
