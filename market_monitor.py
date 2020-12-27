@@ -8,7 +8,7 @@ import string
 import sys
 import time
 import typing
-from dotenv import load_dotenv
+import dotenv
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 import mplfinance as mpf
@@ -16,20 +16,7 @@ import pandas as pd
 import requests
 
 
-LOGGING_FORMAT = '[%(asctime)-15s] %(message)s'
-logging.basicConfig(format=LOGGING_FORMAT)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-
 LOGS_DIR = Path('.') / 'logs'
-
-
-def mkdir_logs():
-    try:
-        os.mkdir(LOGS_DIR)
-    except FileExistsError:
-        pass
 
 
 def get_now_timestamp_string():
@@ -149,7 +136,7 @@ class ZoneFinder:
         return zones
 
     @classmethod
-    def expand_zones_in_place(cls, zones, ratio=0.00005):
+    def expand_zones_in_place(cls, zones: list[Zone], ratio: float = 0.00005):
         for zone in zones:
             zone.high += zone.high * ratio
             zone.low -= zone.low * ratio
@@ -318,7 +305,7 @@ def wait_for_bar_formed(timeframe_in_minutes: int) -> None:
     period = timeframe_in_minutes * 60
     wait_seconds = period - (current_seconds % period)
 
-    logger.info(f'Wait for {wait_seconds} seconds to get the next bar...')
+    logging.info(f'Wait for {wait_seconds} seconds to get the next bar...')
     time.sleep(wait_seconds + 1)
 
 
@@ -339,7 +326,7 @@ class DataGrabber:
     def parse_alphavantage_json_string_to_dataframe(cls, json_string):
         results = json.loads(json_string)
         if 'Error Message' in results:
-            logger.error('Wrong API result:', json_string)
+            logging.error('Wrong API result:', json_string)
             return None
 
         for key in results.keys():
@@ -347,7 +334,7 @@ class DataGrabber:
                 results = results.get(key)
                 break
         else:
-            logger.error('Cannot find price fields!', json_string)
+            logging.error('Cannot find price fields!', json_string)
             return None
 
         df = pd.DataFrame.from_dict(results).transpose().apply(pd.to_numeric).rename(columns={'1. open': 'Open', '2. high': 'High',
@@ -376,7 +363,7 @@ class DataGrabber:
             outputsize=outputsize,
             apikey=os.getenv('ALPHAVANTAGE_API_KEY'),
         )
-        logger.info(
+        logging.info(
             f"Grab from: {api_endpoint[:-len('&apikey=XXXXXXXXXXXXXXXX')]} with API key")
 
         response = requests.get(api_endpoint)
@@ -384,10 +371,10 @@ class DataGrabber:
             if response.status_code == 200:
                 return response.text
             else:
-                logger.error(
+                logging.error(
                     f'Unable to grab data from AlphaVantage! Response={response.status_code}/{response.text}')
         except:
-            logger.error(f'Unexpected exception:', sys.exc_info()[0])
+            logging.error(f'Unexpected exception:', sys.exc_info()[0])
         return '{}'
 
     @classmethod
@@ -407,10 +394,10 @@ class DataGrabber:
             self.from_symbol, self.to_symbol, self.timeframe_in_minutes, 'full', filename)
 
         if df is None:
-            logger.info('Grab data failed')
+            logging.info('Grab data failed')
             self.consecutive_grab_data_failed_counter += 1
             if self.consecutive_grab_data_failed_counter >= 3:
-                logger.error(
+                logging.error(
                     f'Grab data failed {self.consecutive_grab_data_failed_counter} times!')
             return None
 
@@ -419,7 +406,7 @@ class DataGrabber:
 
 
 class Monitor:
-    BAR_NUMS_SLIDING_WINDOW = 50  # Determine S/R by how many bars?
+    BAR_NUMS_SLIDING_WINDOW = 50  # Determine and draw S/R by how many bars?
 
     @classmethod
     def bot_send_message(cls, message, disable_notification=False):
@@ -436,7 +423,7 @@ class Monitor:
             if response.status_code == 200:
                 return True
             time.sleep(3)
-        logger.error(f'Failed to send bot message [{message}]!')
+        logging.error(f'Failed to send bot message [{message}]!')
         return False
 
     @classmethod
@@ -450,6 +437,7 @@ class Monitor:
         data = {
             'chat_id': os.getenv('TELEGRAM_BOT_SEND_MESSAGE_GROUP_ID'),
             'caption': caption,
+            'disable_notification': disable_notification,
         }
         for _ in range(RETRY_LIMIT):
             response = requests.post(
@@ -457,7 +445,7 @@ class Monitor:
             if response.status_code == 200:
                 return True
             time.sleep(3)
-        logger.error(f'Failed to send photo [{caption}]!')
+        logging.error(f'Failed to send photo [{caption}]!')
         return False
 
     @ classmethod
@@ -470,67 +458,56 @@ class Monitor:
         }
         return df.resample(f'{major_timeframe_in_minutes}T').agg(RESAMPLE_MAP).dropna()
 
-    def monitor(cls, data_grabbers, major_timeframe_in_minutes=60, minor_timeframe_in_minutes=5, show_chart=False, save_chart=False):
-        while True:
-            for grabber in data_grabbers:
-                try:
-                    df = grabber.fetch()
-                    if df is None:
-                        continue
+    def check(cls, data_grabber, major_timeframe_in_minutes=60, minor_timeframe_in_minutes=5, show_chart=False, save_chart=False):
+        df = data_grabber.fetch()
+        if df is None:
+            return
 
-                    df_resampled_into_major_timeframe = cls.resample(
-                        df).iloc[-cls.BAR_NUMS_SLIDING_WINDOW:]
-                    df = df.iloc[-cls.BAR_NUMS_SLIDING_WINDOW:]
+        df_resampled_into_major_timeframe = cls.resample(
+            df).iloc[-cls.BAR_NUMS_SLIDING_WINDOW:]
+        df = df.iloc[-cls.BAR_NUMS_SLIDING_WINDOW:]
 
-                    zones, levels = ZoneFinder.find_key_zones_and_levels(
-                        df_resampled_into_major_timeframe, find_levels_threshold=1, merge_levels_threshold=0.0002, zone_weight_threshold=5)
+        zones, levels = ZoneFinder.find_key_zones_and_levels(
+            df_resampled_into_major_timeframe, find_levels_threshold=1, merge_levels_threshold=0.0002, zone_weight_threshold=5)
 
-                    market = grabber.get_symbols()
-                    df_latest = df.tail(3)
-                    if setup := SetupFinder.current_setup(zones, df_latest):
-                        message = f'[{get_now_timestamp_string()}] {market} setup: {setup}'
-                        image_path = None
+        market_name = data_grabber.get_symbols()
+        df_latest = df.tail(3)
+        setup = SetupFinder.current_setup(zones, df_latest)
+        if not setup:
+            return
 
-                        if show_chart or save_chart:
-                            plot_config = dict(
-                                df_in_major_timeframe=df_resampled_into_major_timeframe,
-                                major_timeframe_in_minutes=major_timeframe_in_minutes,
-                                df_in_minor_timeframe=df,
-                                minor_timeframe_in_minutes=minor_timeframe_in_minutes,
-                                zones=zones,
-                                levels=levels,
-                                title=market,
-                            )
-                            ChartPlotter.plot(**plot_config)
+        message = f'[{get_now_timestamp_string()}] {market_name} setup: {setup}'
+        image_path = None
 
-                            if save_chart:
-                                file_name = f"fig_{market}_{setup.replace(' ', '-')}_{get_now_timestamp_string()}.jpg"
-                                image_path = LOGS_DIR / file_name
-                                plt.savefig(fname=image_path,
-                                            bbox_inches='tight')
-                            if show_chart:
-                                mpf.show()
+        if show_chart or save_chart:
+            plot_config = dict(
+                df_in_major_timeframe=df_resampled_into_major_timeframe,
+                major_timeframe_in_minutes=major_timeframe_in_minutes,
+                df_in_minor_timeframe=df,
+                minor_timeframe_in_minutes=minor_timeframe_in_minutes,
+                zones=zones,
+                levels=levels,
+                title=market_name,
+            )
+            ChartPlotter.plot(**plot_config)
 
-                        if save_chart:
-                            if cls.bot_send_image(image_path, message):
-                                logger.info(
-                                    f'Bot sent image: `{image_path}` `{message}`')
-                            else:
-                                logger.error(f'Failed to send image via bot!')
-                        else:
-                            if cls.bot_send_message(message):
-                                logger.info(f'Bot sent message: `{message}`')
-                            else:
-                                logger.error(
-                                    f'Failed to send message via bot!')
-                except:
-                    logger.error(f'Unexpected exception:', sys.exc_info()[0])
+            if save_chart:
+                file_name = f"fig_{market_name}_{setup.replace(' ', '-')}_{get_now_timestamp_string()}.jpg"
+                image_path = LOGS_DIR / file_name
+                plt.savefig(fname=image_path, bbox_inches='tight')
+            if show_chart:
+                mpf.show()
 
-            try:
-                wait_for_bar_formed(minor_timeframe_in_minutes)
-            except KeyboardInterrupt:
-                logger.info(f'Exit by KeyboardInterrupt')
-                exit()
+        if save_chart:
+            if cls.bot_send_image(image_path, message):
+                logging.info(f'Bot sent image: `{image_path}` `{message}`')
+            else:
+                logging.error(f'Failed to send image via bot!')
+        else:
+            if cls.bot_send_message(message):
+                logging.info(f'Bot sent message: `{message}`')
+            else:
+                logging.error(f'Failed to send message via bot!')
 
     @ classmethod
     def run_simulation(cls, df_minor_timeframe_full, start_from_frame_num=0, major_timeframe_in_minutes=60, minor_timeframe_in_minutes=5):
@@ -538,7 +515,7 @@ class Monitor:
                                 cls.BAR_NUMS_SLIDING_WINDOW)
         df = rtapi.initial_fetch()
 
-        def step_one_frame():
+        def step_forward_one_frame():
             nxt = rtapi.fetch_next()
             if nxt is None:
                 print('no more data to plot')
@@ -551,7 +528,7 @@ class Monitor:
             df = df.append(nxt)
 
         for _ in range(start_from_frame_num):
-            step_one_frame()
+            step_forward_one_frame()
 
         df_resampled_into_major_timeframe = cls.resample(
             df).iloc[-cls.BAR_NUMS_SLIDING_WINDOW:]
@@ -583,7 +560,7 @@ class Monitor:
             ax_major_timeframe.clear()
             ax_minor_timeframe.clear()
 
-            step_one_frame()
+            step_forward_one_frame()
             df_resampled_into_major_timeframe = cls.resample(
                 df).iloc[-cls.BAR_NUMS_SLIDING_WINDOW:]
             zones, levels = ZoneFinder.find_key_zones_and_levels(
@@ -612,15 +589,62 @@ class Monitor:
         mpf.show()
 
 
+def setup_logs() -> None:
+    LOG_FILE_PATH = LOGS_DIR / 'market_monitor.log'
+    FORMAT = '[%(asctime)-15s] %(message)s'
+    logging.basicConfig(
+        format=FORMAT,
+        filename=LOG_FILE_PATH,
+        level=logging.INFO
+    )
+
+    try:
+        os.mkdir(LOGS_DIR)
+    except FileExistsError:
+        pass
+
+
+def is_time_to_analyze() -> bool:
+    now = datetime.datetime.now()
+    weekday = now.weekday()
+    if weekday in (5, 6):  # Saturday, Sunday
+        return False
+    return True
+
+
+def load_env() -> None:
+    # If deployed on the cloud, may pass env manually without .env file
+    if os.getenv('ALPHAVANTAGE_API_KEY') is None:
+        dotenv.load_dotenv()
+
+
 if __name__ == '__main__':
-    load_dotenv()
-    mkdir_logs()
-    # Monitor.run_simulation(DataFeedGrabberTestCase.get_test_dataframe_5min_full())
+    run_as_daemon = 'daemon' in sys.argv
+    load_env()
+    setup_logs()
+
+    timeframe_in_minutes = 15
+    monitor = Monitor()
+    # monitor.run_simulation(DataFeedGrabberTestCase.get_test_dataframe_5min_full())
     data_grabbers = [
-        DataGrabber('EUR', 'USD', 15),
-        DataGrabber('AUD', 'USD', 15),
-        DataGrabber('USD', 'JPY', 15),
-        DataGrabber('EUR', 'GBP', 15),
+        DataGrabber('EUR', 'USD', timeframe_in_minutes),
+        DataGrabber('AUD', 'USD', timeframe_in_minutes),
+        DataGrabber('USD', 'JPY', timeframe_in_minutes),
+        DataGrabber('EUR', 'GBP', timeframe_in_minutes),
     ]
-    Monitor().monitor(data_grabbers, minor_timeframe_in_minutes=15,
-                      show_chart=False, save_chart=True)
+
+    while True:
+        if is_time_to_analyze():
+            for data_grabber in data_grabbers:
+                try:
+                    monitor.check(data_grabber, minor_timeframe_in_minutes=timeframe_in_minutes,
+                                  show_chart=False, save_chart=True)
+                except:
+                    logging.error(f'Unexpected exception:', sys.exc_info()[0])
+        else:
+            logging.info("It's rest time...")
+
+        if not run_as_daemon:
+            break
+
+        wait_for_bar_formed(timeframe_in_minutes)
