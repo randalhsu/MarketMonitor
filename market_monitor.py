@@ -19,7 +19,7 @@ import requests
 LOGS_DIR = Path('.') / 'logs'
 
 
-def get_now_timestamp_string():
+def get_now_timestamp_string() -> str:
     return datetime.datetime.now().strftime('%Y-%m-%d_%H%M%S')
 
 
@@ -40,12 +40,12 @@ class Level(typing.NamedTuple):
     def __repr__(self) -> str:
         return f'<L {self.price},w={self.weight}({self.role})>'
 
-    def __lt__(self, rhs):
+    def __lt__(self, rhs) -> bool:
         return self.price < rhs.price
 
 
 class Zone:
-    def __init__(self, level: Level = None, *, low: float = 0, high: float = 0, weight: int = 0, role: Role = Role.UNKNOWN):
+    def __init__(self, level: Level = None, *, low: float = 0, high: float = 0, weight: int = 0, role: Role = Role.UNKNOWN) -> None:
         '''
         low: Lower bound of this zone
         high: Higher bound of this zone
@@ -75,7 +75,7 @@ class Zone:
 
 class ZoneFinder:
     @classmethod
-    def find_levels(cls, df, threshold=3):
+    def find_levels(cls, df: pd.DataFrame, threshold: int = 3) -> list[Level]:
         levels = []
         highs = df['High']
         lows = df['Low']
@@ -111,7 +111,7 @@ class ZoneFinder:
         return levels
 
     @classmethod
-    def merge_levels_into_zones(cls, levels, merge_threshold=0.0004, zone_weight_threshold=5):
+    def merge_levels_into_zones(cls, levels: list[Level], merge_threshold: float = 0.0004, zone_weight_threshold: int = 5) -> list[Zone]:
         if not levels:
             return []
 
@@ -136,13 +136,13 @@ class ZoneFinder:
         return zones
 
     @classmethod
-    def expand_zones_in_place(cls, zones: list[Zone], ratio: float = 0.00005):
+    def expand_zones_in_place(cls, zones: list[Zone], ratio: float = 0.00005) -> None:
         for zone in zones:
             zone.high += zone.high * ratio
             zone.low -= zone.low * ratio
 
     @classmethod
-    def find_key_zones_and_levels(cls, df, *, find_levels_threshold=3, merge_levels_threshold=0.0004, zone_weight_threshold=5):
+    def find_key_zones_and_levels(cls, df: pd.DataFrame, *, find_levels_threshold: int = 3, merge_levels_threshold: float = 0.0004, zone_weight_threshold: int = 5) -> tuple[list[Zone], list[Level]]:
         levels = cls.find_levels(df, find_levels_threshold)
         zones = cls.merge_levels_into_zones(
             levels, merge_levels_threshold, zone_weight_threshold)
@@ -153,8 +153,12 @@ class ZoneFinder:
 class SetupFinder:
     @ staticmethod
     def current_setup(zones: list[Zone], df_minor_timeframe_latest: pd.DataFrame) -> str:
+        '''Check if there is a setup now.
+            If yes, return the setup description.
+            If no, return empty string.
+        '''
 
-        def is_bar_intersects_with_zone(bar, zone):
+        def is_bar_intersects_with_zone(bar: pd.DataFrame, zone: Zone) -> bool:
             if bar.Low > zone.high:
                 return False
             if bar.High < zone.low:
@@ -217,8 +221,9 @@ class ChartPlotter:
     }
 
     @classmethod
-    def get_levels_plot_config(cls, levels):
-        def normalized_level_linewidth(weight):
+    def get_levels_plot_config(cls, levels: list[Level]) -> dict:
+
+        def normalized_level_linewidth(weight: int) -> int:
             return (weight + 9) // 10
 
         # TODO: Wait for multiple fill_between() implementation:
@@ -232,7 +237,7 @@ class ChartPlotter:
         return hlines
 
     @classmethod
-    def plot(cls, df_in_major_timeframe, major_timeframe_in_minutes, df_in_minor_timeframe, minor_timeframe_in_minutes, zones=[], levels=[], title='', fig=None, ax_major_timeframe=None, ax_minor_timeframe=None):
+    def plot(cls, df_in_major_timeframe: pd.DataFrame, major_timeframe_in_minutes: int, df_in_minor_timeframe: pd.DataFrame, minor_timeframe_in_minutes: int, zones: list[Zone] = [], levels: list[Level] = [], title: str = '', fig=None, ax_major_timeframe=None, ax_minor_timeframe=None):
         if fig is None:
             fig = mpf.figure(figsize=(10, 5))
             fig.suptitle(title)
@@ -274,7 +279,7 @@ class ChartPlotter:
 
 
 class RealTimeAPIMock:
-    def __init__(self, df, bar_nums_sliding_window=50, major_timeframe_in_minutes=60, minor_timeframe_in_minutes=5):
+    def __init__(self, df: pd.DataFrame, bar_nums_sliding_window: int = 50, major_timeframe_in_minutes: int = 60, minor_timeframe_in_minutes: int = 5) -> None:
         self.data_pointer = 0
         self.df = df
         self.df_len = len(self.df)
@@ -282,7 +287,7 @@ class RealTimeAPIMock:
         self.major_timeframe_in_minutes = major_timeframe_in_minutes
         self.minor_timeframe_in_minutes = minor_timeframe_in_minutes
 
-    def initial_fetch(self):
+    def initial_fetch(self) -> pd.DataFrame:
         if self.data_pointer > 0:
             return
         r1 = self.data_pointer
@@ -291,7 +296,7 @@ class RealTimeAPIMock:
             (self.major_timeframe_in_minutes // self.minor_timeframe_in_minutes)
         return self.df.iloc[r1:self.data_pointer, :]
 
-    def fetch_next(self):
+    def fetch_next(self) -> pd.DataFrame:
         r1 = self.data_pointer
         self.data_pointer += 1
         if self.data_pointer >= self.df_len:
@@ -310,20 +315,20 @@ def wait_for_bar_formed(timeframe_in_minutes: int) -> None:
 
 
 class DataGrabber:
-    def __init__(self, from_symbol, to_symbol, timeframe_in_minutes=15):
+    def __init__(self, from_symbol: str, to_symbol: str, timeframe_in_minutes: int = 15) -> None:
         self.from_symbol = from_symbol
         self.to_symbol = to_symbol
         self.timeframe_in_minutes = timeframe_in_minutes
         self.consecutive_grab_data_failed_counter = 0
 
-    def get_symbols(self):
+    def get_symbols(self) -> str:
         return f'{self.from_symbol}{self.to_symbol}'
 
-    def get_timeframe(self):
+    def get_timeframe(self) -> int:
         return self.timeframe_in_minutes
 
     @classmethod
-    def parse_alphavantage_json_string_to_dataframe(cls, json_string):
+    def parse_alphavantage_json_string_to_dataframe(cls, json_string: str) -> pd.DataFrame:
         results = json.loads(json_string)
         if 'Error Message' in results:
             logging.error('Wrong API result:', json_string)
@@ -344,7 +349,7 @@ class DataGrabber:
         return df.iloc[::-1]
 
     @classmethod
-    def _grab_alphavantage_json_string(cls, from_symbol: str, to_symbol: str, interval: int, outputsize: str):
+    def _grab_alphavantage_json_string(cls, from_symbol: str, to_symbol: str, interval: int, outputsize: str) -> str:
         '''
         interval: 1 / 5 / 15 / 30 / 60 (minutes)
         outputsize: 'compact', 'full'
@@ -378,7 +383,7 @@ class DataGrabber:
         return '{}'
 
     @classmethod
-    def grab_alphavantage_dataframe(cls, from_symbol: str, to_symbol: str, interval: int, outputsize: str = 'compact', save_to_filename: str = ''):
+    def grab_alphavantage_dataframe(cls, from_symbol: str, to_symbol: str, interval: int, outputsize: str = 'compact', save_to_filename: str = '') -> pd.DataFrame:
         json_string = cls._grab_alphavantage_json_string(
             from_symbol, to_symbol, interval, outputsize)
 
@@ -388,7 +393,7 @@ class DataGrabber:
 
         return cls.parse_alphavantage_json_string_to_dataframe(json_string)
 
-    def fetch(self):
+    def fetch(self) -> pd.DataFrame:
         filename = f'debug_grab_result_{self.from_symbol}{self.to_symbol}_{self.timeframe_in_minutes}_{get_now_timestamp_string()}.log'
         df = DataGrabber.grab_alphavantage_dataframe(
             self.from_symbol, self.to_symbol, self.timeframe_in_minutes, 'full', filename)
@@ -409,7 +414,7 @@ class Monitor:
     BAR_NUMS_SLIDING_WINDOW = 50  # Determine and draw S/R by how many bars?
 
     @classmethod
-    def bot_send_message(cls, message, disable_notification=False):
+    def bot_send_message(cls, message: str, disable_notification: bool = False) -> bool:
         SEND_MESSAGE_API_ENDPOINT = f'https://api.telegram.org/bot{os.getenv("TELEGRAM_BOT_TOKEN")}/sendMessage'
         RETRY_LIMIT = 3
 
@@ -427,7 +432,7 @@ class Monitor:
         return False
 
     @classmethod
-    def bot_send_image(cls, image_path, caption='', disable_notification=False):
+    def bot_send_image(cls, image_path: str, caption: str = '', disable_notification: bool = False) -> bool:
         SEND_PHOTO_API_ENDPOINT = f'https://api.telegram.org/bot{os.getenv("TELEGRAM_BOT_TOKEN")}/sendPhoto'
         RETRY_LIMIT = 3
 
@@ -449,7 +454,7 @@ class Monitor:
         return False
 
     @ classmethod
-    def resample(cls, df, major_timeframe_in_minutes=60):
+    def resample(cls, df: pd.DataFrame, major_timeframe_in_minutes: int = 60) -> pd.DataFrame:
         RESAMPLE_MAP = {
             'Open': 'first',
             'High': 'max',
@@ -458,7 +463,7 @@ class Monitor:
         }
         return df.resample(f'{major_timeframe_in_minutes}T').agg(RESAMPLE_MAP).dropna()
 
-    def check(cls, data_grabber, major_timeframe_in_minutes=60, minor_timeframe_in_minutes=5, show_chart=False, save_chart=False):
+    def check(cls, data_grabber: DataGrabber, major_timeframe_in_minutes: int = 60, minor_timeframe_in_minutes: int = 5, show_chart: bool = False, save_chart: bool = False) -> None:
         df = data_grabber.fetch()
         if df is None:
             return
@@ -510,7 +515,7 @@ class Monitor:
                 logging.error(f'Failed to send message via bot!')
 
     @ classmethod
-    def run_simulation(cls, df_minor_timeframe_full, start_from_frame_num=0, major_timeframe_in_minutes=60, minor_timeframe_in_minutes=5):
+    def run_simulation(cls, df_minor_timeframe_full: pd.DataFrame, start_from_frame_num: int = 0, major_timeframe_in_minutes: int = 60, minor_timeframe_in_minutes: int = 5) -> None:
         rtapi = RealTimeAPIMock(df_minor_timeframe_full,
                                 cls.BAR_NUMS_SLIDING_WINDOW)
         df = rtapi.initial_fetch()
