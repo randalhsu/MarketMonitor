@@ -600,6 +600,11 @@ class Monitor:
 
 
 def setup_logs() -> None:
+    try:
+        os.mkdir(LOGS_DIR)
+    except FileExistsError:
+        pass
+
     LOG_FILE_PATH = LOGS_DIR / 'market_monitor.log'
     FORMAT = '[%(asctime)-15s] %(message)s'
     logging.basicConfig(
@@ -607,11 +612,6 @@ def setup_logs() -> None:
         filename=LOG_FILE_PATH,
         level=logging.INFO
     )
-
-    try:
-        os.mkdir(LOGS_DIR)
-    except FileExistsError:
-        pass
 
 
 def is_time_to_analyze() -> bool:
@@ -629,6 +629,7 @@ def load_env() -> None:
 
 
 if __name__ == '__main__':
+    forced = 'force' in sys.argv
     run_as_daemon = 'daemon' in sys.argv
     run_simulation_test = 'sim' in sys.argv
 
@@ -650,7 +651,7 @@ if __name__ == '__main__':
     ]
 
     while True:
-        if is_time_to_analyze():
+        if is_time_to_analyze() or forced:
             for data_grabber in data_grabbers:
                 try:
                     monitor.check(data_grabber, minor_timeframe_in_minutes=timeframe_in_minutes,
