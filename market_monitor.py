@@ -8,6 +8,7 @@ import string
 import sys
 import time
 import typing
+import urllib.parse
 import dotenv
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
@@ -340,7 +341,7 @@ class DataGrabber:
             return None
 
         for key in results.keys():
-            if key.startswith('Time Series FX '):
+            if key.startswith('Time Series '):
                 results = results.get(key)
                 break
         else:
@@ -359,20 +360,27 @@ class DataGrabber:
         interval: 1 / 5 / 15 / 30 / 60 (minutes)
         outputsize: 'compact', 'full'
         '''
-        # https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol=EUR&to_symbol=USD&interval=5min&apikey=demo
-        api_endpoint = string.Template(
-            'https://www.alphavantage.co/query?function=FX_INTRADAY&datatype=json&' +
-            'from_symbol=$from_symbol&' +
-            'to_symbol=$to_symbol&' +
-            'interval=${interval}min&' +
-            'outputsize=$outputsize&' +
-            'apikey=$apikey').substitute(
-            from_symbol=from_symbol,
-            to_symbol=to_symbol,
-            interval=interval,
-            outputsize=outputsize,
-            apikey=os.getenv('ALPHAVANTAGE_API_KEY'),
-        )
+        # Example: https://www.alphavantage.co/query?function=CRYPTO_INTRADAY&symbol=BTC&market=USD&interval=5min&apikey=demo
+        # Example: https://www.alphavantage.co/query?function=FX_INTRADAY&from_symbol=EUR&to_symbol=USD&interval=15min&apikey=demo
+        args = {
+            'datatype': 'json',
+            'interval': f'{interval}min',
+            'outputsize': outputsize,
+            'apikey': os.getenv('ALPHAVANTAGE_API_KEY'),
+        }
+        if from_symbol in ('BTC', 'ETH'):
+            args.update({
+                'function': 'CRYPTO_INTRADAY',
+                'symbol': from_symbol,
+                'market': to_symbol,
+            })
+        else:
+            args.update({
+                'function': 'FX_INTRADAY',
+                'from_symbol': from_symbol,
+                'to_symbol': to_symbol,
+            })
+        api_endpoint = 'https://www.alphavantage.co/query?' + urllib.parse.urlencode(args)
         logging.info(
             f"Grab from: {api_endpoint[:-len('&apikey=XXXXXXXXXXXXXXXX')]} with API key")
 
@@ -644,10 +652,10 @@ if __name__ == '__main__':
         exit()
 
     data_grabbers = [
+        DataGrabber('ETH', 'USD', timeframe_in_minutes),
         DataGrabber('EUR', 'USD', timeframe_in_minutes),
         DataGrabber('AUD', 'USD', timeframe_in_minutes),
         DataGrabber('USD', 'JPY', timeframe_in_minutes),
-        DataGrabber('EUR', 'GBP', timeframe_in_minutes),
     ]
 
     while True:
