@@ -1,5 +1,6 @@
-python-dotenv
-pandas
-matplotlib
-mplfinance
-requests
+python-dotenv==0.19.2
+pandas==1.4.1
+matplotlib==3.5.1
+mplfinance==0.12.8b9
+requests==2.27.1
+
