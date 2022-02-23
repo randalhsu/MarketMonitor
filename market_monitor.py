@@ -535,7 +535,7 @@ class Monitor:
                 return
 
             nonlocal df
-            df = df.append(nxt)
+            df = pd.concat([df, nxt])
 
         for _ in range(start_from_frame_num):
             step_forward_one_frame()
